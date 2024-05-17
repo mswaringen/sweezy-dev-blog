@@ -8,7 +8,7 @@ run dev server (live reload and serve)
 
 `pelican -r -l`
 
-publish with publish config to /docs for GH Pages
+publish: run this command from inside the Pelican dir
 
-`pelican content -o docs -s publishconf.py`
+`pelican content -o .. -s publishconf.py`
 
