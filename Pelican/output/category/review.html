@@ -6,8 +6,6 @@
         <meta name="generator" content="Pelican" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@exampledev/new.css@1.1.2/new.min.css" />
-        <link href="/feeds/all.atom.xml" type="application/atom+xml" rel="alternate" title="sweezy.dev Full Atom Feed" />
-        <link href="/feeds/review.atom.xml" type="application/atom+xml" rel="alternate" title="sweezy.dev Categories Atom Feed" />
 </head>
 
 <body>
@@ -25,7 +23,25 @@
 
         <article>
                 <header> <h2><a href="/my-first-review.html" rel="bookmark" title="Permalink to My First Review">My First Review</a></h2> </header>
-                <section><p>Following is a review of my favorite mechanical keyboard.</p></section>
+                <section><p>Following is a review of my favorite mechanical keyboard.</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@task</span>
+<span class="k">def</span> <span class="nf">serve</span><span class="p">(</span><span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Serve site at http://$HOST:$PORT/ (default is localhost:8000)&quot;&quot;&quot;</span>
+
+    <span class="k">class</span> <span class="nc">AddressReuseTCPServer</span><span class="p">(</span><span class="n">RootedHTTPServer</span><span class="p">):</span>
+        <span class="n">allow_reuse_address</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="n">server</span> <span class="o">=</span> <span class="n">AddressReuseTCPServer</span><span class="p">(</span>
+        <span class="n">CONFIG</span><span class="p">[</span><span class="s2">&quot;deploy_path&quot;</span><span class="p">],</span>
+        <span class="p">(</span><span class="n">CONFIG</span><span class="p">[</span><span class="s2">&quot;host&quot;</span><span class="p">],</span> <span class="n">CONFIG</span><span class="p">[</span><span class="s2">&quot;port&quot;</span><span class="p">]),</span>
+        <span class="n">ComplexHTTPRequestHandler</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">OPEN_BROWSER_ON_SERVE</span><span class="p">:</span>
+        <span class="c1"># Open site in default browser</span>
+        <span class="kn">import</span> <span class="nn">webbrowser</span>
+
+        <span class="n">webbrowser</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;http://</span><span class="si">{host …</span></code></pre></div></section>
                 <footer>
                     <p>Published: <time datetime="2010-12-03T10:20:00+00:00"> Fri 03 December 2010 </time></p>
                     <address>By
