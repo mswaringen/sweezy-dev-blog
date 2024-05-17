@@ -1,4 +1,4 @@
-# Sweezy Dev Blog
+Title: About
 
 Powered by [Pelican](https://getpelican.com/) and [new.css](https://newcss.net/)
 
