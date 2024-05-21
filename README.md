@@ -12,7 +12,8 @@ publish: run this command from inside the Pelican dir
 `pelican content -o .. -s publishconf.py`
 
 
-### Built with
+### built with
 - [Pelican](https://getpelican.com/): Python static site generator
-- [Simple](https://www.paulox.net/2023/11/30/pelican-4.9-classless-simple-theme/): class-less theme for Pelican
+- [Simple](https://www.paulox.net/2023/11/30/pelican-4.9-classless-simple-theme/): Class-less theme for Pelican
 - [Pico CSS](https://picocss.com/): Minimal CSS framework for semantic HTML
+- [Github Pages](https://pages.github.com/): Static site hosting
