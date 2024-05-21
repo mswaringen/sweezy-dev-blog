@@ -1,211 +1,310 @@
 Title: Deploying Cookiecutter Django on Fly.io
-Date: 2024-5-01 10:20
+Date: 2024-5-21 16:00
 Category: devops
 
 # Deploying Cookiecutter Django on Fly.io
-### _with Celery, Postgres, Redis_
+### _with Celery, Postgres, Redis, and S3 storage with Tigris_
 
-[![N|Solid](https://cldup.com/dTxpPi9lDf.thumb.png)](https://nodesource.com/products/nsolid)
-
-[![Build Status](https://travis-ci.org/joemccann/dillinger.svg?branch=master)](https://travis-ci.org/joemccann/dillinger)
 
 
 ## tl;dr
-Cookiecutter Django is awesome but a difficult to deploy apart from the official routes. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)
+Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)
+
+> Note: We will be using the celery_django_results package to save job status to Postgres and view results in Django Admin. This is used as a replacement for Flower in production.
 
 ## Steps
 
 1) Generate project locally for Docker
+
 2) Add new Dockerfile + fly.toml
+
 3) Inject secrets from CLI
+
 4) Fly launch + fly deploy
 
-Because...
-- Cookiecutter Django is a great starting template with many great production features already setup. This works great in running locally but 
 
-Dillinger is a cloud-enabled, mobile-ready, offline-storage compatible,
-AngularJS-powered HTML5 Markdown editor.
+Now lets dive in...
 
-- Type some Markdown on the left
-- See HTML in the right
-- ✨Magic ✨
+## 1) Generate project locally with Docker
 
-## Features
+Prereqs: Docker, Cookiecutter
 
-- Import a HTML file and watch it magically convert to Markdown
-- Drag and drop images (requires your Dropbox account be linked)
-- Import and save files from GitHub, Dropbox, Google Drive and One Drive
-- Drag and drop markdown and HTML files into Dillinger
-- Export documents as Markdown, HTML and PDF
+Follow the [instructions](https://cookiecutter-django.readthedocs.io/en/latest/developing-locally-docker.html) to setup a local project with Docker. 
 
-Markdown is a lightweight markup language based on the formatting conventions
-that people naturally use in email.
-As [John Gruber] writes on the [Markdown site][df1]
+### _Optional_ 
 
-> The overriding design goal for Markdown's
-> formatting syntax is to make it as readable
-> as possible. The idea is that a
-> Markdown-formatted document should be
-> publishable as-is, as plain text, without
-> looking like it's been marked up with tags
-> or formatting instructions.
+#### _A) Create test-task view_
 
-This text you see here is *actually- written in Markdown! To get a feel
-for Markdown's syntax, type some text into the left window and
-watch the results in the right.
+This view will trigger a worker action upon GET request, letting us easily observe the entire system in action.
 
-## Tech
+1) Add the following function to `config/celery_app.py` 
 
-Dillinger uses a number of open source projects to work properly:
-
-- [AngularJS] - HTML enhanced for web apps!
-- [Ace Editor] - awesome web-based text editor
-- [markdown-it] - Markdown parser done right. Fast and easy to extend.
-- [Twitter Bootstrap] - great UI boilerplate for modern web apps
-- [node.js] - evented I/O for the backend
-- [Express] - fast node.js network app framework [@tjholowaychuk]
-- [Gulp] - the streaming build system
-- [Breakdance](https://breakdance.github.io/breakdance/) - HTML
-to Markdown converter
-- [jQuery] - duh
-
-And of course Dillinger itself is open source with a [public repository][dill]
- on GitHub.
-
-## Installation
-
-Dillinger requires [Node.js](https://nodejs.org/) v10+ to run.
-
-Install the dependencies and devDependencies and start the server.
-
-```sh
-cd dillinger
-npm i
-node app
+```
+   @app.task(bind=True, ignore_result=False)
+   def example_task(self):
+      print("You've triggered the example task!")
 ```
 
-For production environments...
+2) Create `test_views.py` in the `config` directory and add the following code
 
-```sh
-npm install --production
-NODE_ENV=production node app
+```
+   from django.http import HttpResponse
+   from .celery_app import example_task
+
+   def test_task(request):
+      example_task.delay()
+      return HttpResponse("Task triggered, see Celery logs")
 ```
 
-## Plugins
+3) Now modify `url_patterns ` in `config/urls.py` with the line
 
-Dillinger is currently extended with the following plugins.
-Instructions on how to use them in your own application are linked below.
-
-| Plugin | README |
-| ------ | ------ |
-| Dropbox | [plugins/dropbox/README.md][PlDb] |
-| GitHub | [plugins/github/README.md][PlGh] |
-| Google Drive | [plugins/googledrive/README.md][PlGd] |
-| OneDrive | [plugins/onedrive/README.md][PlOd] |
-| Medium | [plugins/medium/README.md][PlMe] |
-| Google Analytics | [plugins/googleanalytics/README.md][PlGa] |
-
-## Development
-
-Want to contribute? Great!
-
-Dillinger uses Gulp + Webpack for fast developing.
-Make a change in your file and instantaneously see your updates!
-
-Open your favorite Terminal and run these commands.
-
-First Tab:
-
-```sh
-node app
+```
+   path("test-task/", test_views.test_task, name="test_task"),
 ```
 
-Second Tab:
+   After importing the view with
 
-```sh
-gulp watch
+```
+   from config import test_views
 ```
 
-(optional) Third:
+#### _B) Install [celery-django-results](https://github.com/celery/django-celery-results)_
+This allows us to view the results of Celery worker tasks in the database with Django Admin
 
-```sh
-karma test
+1) Add `django-celery-results==2.5.1` to `requirements/base.txt`
+
+2) Add `"django_celery_results",` to `INSTALLED_APPS` in `config/settings/base.py`
+
+3) Further modify `base.py` with the following additions
+
+```
+   CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND", "django-db”), 
+   CELERY_TASK_TRACK_STARTED = True
 ```
 
-#### Building for source
+   Modify the following line to allow CELERY_BROKER_URL to access REDIS_URL directly (this will be set by Fly automatically)
 
-For production release:
-
-```sh
-gulp build --prod
+```
+   CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=env('REDIS_URL'))
 ```
 
-Generating pre-built zip archives for distribution:
 
-```sh
-gulp build dist --prod
+4) Build and migrate
+
+```
+   docker compose -f local.yml build
+   docker compose -f local.yml build
+   docker compose -f local.yml run --rm django python manage.py migrate
 ```
 
-## Docker
+#### _C) Test locally with Flower and Django Admin_
 
-Dillinger is very easy to install and deploy in a Docker container.
+Run the stack and create superuser
 
-By default, the Docker will expose port 8080, so change this within the
-Dockerfile if necessary. When ready, simply use the Dockerfile to
-build the image.
-
-```sh
-cd dillinger
-docker build -t <youruser>/dillinger:${package.json.version} .
+```
+   export COMPOSE_FILE=local.yml
+   docker compose up
+   docker compose run --rm django python manage.py createsuperuser
 ```
 
-This will create the dillinger image and pull in the necessary dependencies.
-Be sure to swap out `${package.json.version}` with the actual
-version of Dillinger.
+In a browser open up three tabs:
 
-Once done, run the Docker image and map the port to whatever you wish on
-your host. In this example, we simply map port 8000 of the host to
-port 8080 of the Docker (or whatever port was exposed in the Dockerfile):
+   1) Flower (Celery worker monitor): [http://localhost:5555/](http://localhost:5555/)
+   > _Note: the login credentials are set in .envs/.local/.django_
 
-```sh
-docker run -d -p 8000:8080 --restart=always --cap-add=SYS_ADMIN --name=dillinger <youruser>/dillinger:${package.json.version}
+   2) Django Admin: [http://localhost:8000/admin](http://localhost:8000/admin)
+
+   3) Web test-task: [http://localhost:8000/test-task](http://localhost:8000/test-task)
+
+> The test-task GET request kicks off a worker task. Check the activity in the Flower tab, and then check again in Django Admin under `Celery Results / Task Results`
+>> _If you see Task State: SUCCESS you are ready to move to deployment!_ 
+
+## 2) Create fly.toml and custom Dockerfile
+
+_[Full description](https://fly.io/docs/apps/launch/) of the Fly launch and deploy process_
+
+Prereqs: flytmcl
+
+Running `fly launch` will create generic fly.toml and Dockerfile required for deployment, however we need custom files for Cookiecutter Django
+
+### Custom Dockerfile
+
+This is a version of the Dockerfile found in `compose/production/django/Dockerfile` modified to fit Fly's build process.
+
+> add notes about injecting dummy vars to run collect
+
+_Dockerfile_
+```
+# define an alias for the specific python version used in this file.
+FROM docker.io/python:3.12.3-slim-bookworm as python
+
+# Python build stage
+FROM python as python-build-stage
+
+ARG BUILD_ENVIRONMENT=production
+
+# Install apt packages
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  # dependencies for building Python packages
+  build-essential \
+  # psycopg dependencies
+  libpq-dev
+
+# Requirements are installed here to ensure they will be cached.
+COPY ./requirements .
+
+# Create Python Dependency and Sub-Dependency Wheels.
+RUN pip wheel --wheel-dir /usr/src/app/wheels  \
+  -r ${BUILD_ENVIRONMENT}.txt
+
+
+# Python 'run' stage
+FROM python as python-run-stage
+
+ARG BUILD_ENVIRONMENT=production
+ARG APP_HOME=/code
+
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV BUILD_ENV ${BUILD_ENVIRONMENT}
+
+WORKDIR ${APP_HOME}
+
+RUN addgroup --system django \
+    && adduser --system --ingroup django django
+
+
+# Install required system dependencies
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  # psycopg dependencies
+  libpq-dev \
+  # Translations dependencies
+  gettext \
+  # cleaning up unused files
+  && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
+  && rm -rf /var/lib/apt/lists/*
+
+# All absolute dir copies ignore workdir instruction. All relative dir copies are wrt to the workdir instruction
+# copy python dependency wheels from python-build-stage
+COPY --from=python-build-stage /usr/src/app/wheels  /wheels/
+
+# use wheels to install python dependencies
+RUN pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/* \
+  && rm -rf /wheels/
+
+COPY . /code
+
+# Set dummy vars for building purposes
+ENV DJANGO_SETTINGS_MODULE "config.settings.production"
+ENV DATABASE_URL "temp"
+ENV DJANGO_SECRET_KEY "non-secret-key-for-building-purposes"
+ENV REDIS_URL "temp"
+ENV DJANGO_ADMIN_URL "temp"
+ENV DJANGO_ALLOWED_HOSTS "temp"
+ENV MAILJET_API_KEY "temp"
+ENV MAILJET_SECRET_KEY "temp"
+ENV SENTRY_DSN ""
+ENV DJANGO_AWS_ACCESS_KEY_ID "temp"
+ENV DJANGO_AWS_SECRET_ACCESS_KEY "temp"
+ENV DJANGO_AWS_STORAGE_BUCKET_NAME "temp"
+
+RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+CMD ["gunicorn", "--bind", ":8000", "--workers", "1", "config.wsgi"]
+
 ```
 
-> Note: `--capt-add=SYS-ADMIN` is required for PDF rendering.
+### Custom fly.toml
 
-Verify the deployment by navigating to your server address in
-your preferred browser.
+As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run migrate on deploy.
 
-```sh
-127.0.0.1:8000
+The following variables require user input: `app, primary_region`
+> Note the number of workers can be set under `processes/app` (default is 1)
+
+_fly.toml_
+```
+# fly.toml app configuration file generated for fly-cookiecutter-django-1 on 2024-05-01T15:44:30+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'fly-cookiecutter-django-1'
+primary_region = 'mad'
+console_command = '/code/manage.py shell'
+
+[build]
+
+[deploy]
+  release_command = 'python manage.py migrate'
+
+[env]
+  PORT = '8000'
+
+[processes]
+  app = 'python -m gunicorn --bind :8000 --workers 1 config.wsgi'
+  worker = 'python -m celery -A config.celery_app:app worker -l DEBUG'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[statics]]
+  guest_path = '/code/static'
+  url_prefix = '/static/'
+
 ```
 
-## License
+## 3) Launch and Deploy
 
-MIT
+### Launch
+Run `fly launch` from the root directory
 
-**Free Software, Hell Yeah!**
+_Launch wizard_
+```
+- YES to copy config to new app
+- NO to overwriting Dockerfile
+- YES to modifying configuration, click to open setting page, select Postgres and Redis instances
+```
 
-[//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
+### Import secrets
+- DATABASE_URL and REDIS_URL are set by `fly launch`, all others need to be imported
+- Modify `.envs/.production/.django` as needed, if a service isnt ready just leave a temp value
+- You must comment out `REDIS_URL`
 
-   [dill]: <https://github.com/joemccann/dillinger>
-   [git-repo-url]: <https://github.com/joemccann/dillinger.git>
-   [john gruber]: <http://daringfireball.net>
-   [df1]: <http://daringfireball.net/projects/markdown/>
-   [markdown-it]: <https://github.com/markdown-it/markdown-it>
-   [Ace Editor]: <http://ace.ajax.org>
-   [node.js]: <http://nodejs.org>
-   [Twitter Bootstrap]: <http://twitter.github.com/bootstrap/>
-   [jQuery]: <http://jquery.com>
-   [@tjholowaychuk]: <http://twitter.com/tjholowaychuk>
-   [express]: <http://expressjs.com>
-   [AngularJS]: <http://angularjs.org>
-   [Gulp]: <http://gulpjs.com>
+Run the following command to import the secrets to Fly:
 
-   [PlDb]: <https://github.com/joemccann/dillinger/tree/master/plugins/dropbox/README.md>
-   [PlGh]: <https://github.com/joemccann/dillinger/tree/master/plugins/github/README.md>
-   [PlGd]: <https://github.com/joemccann/dillinger/tree/master/plugins/googledrive/README.md>
-   [PlOd]: <https://github.com/joemccann/dillinger/tree/master/plugins/onedrive/README.md>
-   [PlMe]: <https://github.com/joemccann/dillinger/tree/master/plugins/medium/README.md>
-   [PlGa]: <https://github.com/RahulHP/dillinger/blob/master/plugins/googleanalytics/README.md>
+   ```
+   cat .envs/.production/.django | fly secrets import
+   ```
 
+### Deploy
+
+Run `fly deploy`
+
+If deployment was successful, create a superuser via ssh console
+
+```
+fly ssh console
+python manage.py createsuperuser
+```
+
+Now open tabs for Django Admin and test-task to verify the system is working.
+
+--------------------
+
+#### If you've gotten this far congratulations you are now live on Fly.io!
+
+### Resources
+- [Example code on Github](https://github.com/mswaringen/fly-cookiecutter-django)
+- [Deploy with Github Actions](https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/)  

@@ -11,9 +11,12 @@ AUTHOR_SAVE_AS = ''
 DEFAULT_LANG = 'en'
 
 THEME = "simple"
+## more style sheet URLS - https://www.paulox.net/2023/11/30/pelican-4.9-classless-simple-theme/
+
 # STYLESHEET_URL = "https://cdn.simplecss.org/simple.min.css"
-STYLESHEET_URL = "https://cdn.jsdelivr.net/npm/@exampledev/new.css@1.1.2/new.min.css"
-# CSS_FILE = 'new.css'
+# STYLESHEET_URL = "https://cdn.jsdelivr.net/npm/@exampledev/new.css@1.1.2/new.min.css"
+# STYLESHEET_URL = "https://cdn.jsdelivr.net/npm/water.css@2/out/water.min.css"
+STYLESHEET_URL = "https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
 
 # Feed generation is usually not desired when developing
 FEED_ALL_ATOM = None

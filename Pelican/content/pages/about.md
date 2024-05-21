@@ -1,8 +1,12 @@
-Title: About
+Title: about
 
-A place to save concepts for future reference
+A place to save content for my future reference
 
+[Github](https://github.com/mswaringen/)
 
+----
 
-
-.
+Built with
+- [Pelican](https://getpelican.com/): Python static site generator
+- [Simple](https://www.paulox.net/2023/11/30/pelican-4.9-classless-simple-theme/): class-less theme for Pelican
+- [Pico CSS](https://picocss.com/): Minimal CSS framework for semantic HTML
