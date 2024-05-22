@@ -168,7 +168,16 @@ AWS_ACCESS_KEY_ID - Tigris
 AWS_SECRET_ACCESS_KEY - Tigris
 ```
 
-Modify both `settings/production.py` and `.envs/.production/.django` to accomodate these variables
+Modify both `settings/base.py`, `settings/production.py`  and `.envs/.production/.django` to accomodate these variables
+
+_relevant section of base.py_
+
+```
+   CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND", "django-db”), 
+   CELERY_TASK_TRACK_STARTED = True
+   CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=env('REDIS_URL'))
+```
+
 
 _relevant section of production.py_
 ```
