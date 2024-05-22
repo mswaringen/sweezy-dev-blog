@@ -175,7 +175,13 @@ python<span class="w"> </span>manage.py<span class="w"> </span>migrate
 <span class="n">AWS_SECRET_ACCESS_KEY</span> <span class="o">-</span> <span class="n">Tigris</span>
 </code></pre></div>
 
-<p>Modify both <code>settings/production.py</code> and <code>.envs/.production/.django</code> to accomodate these variables</p>
+<p>Modify both <code>settings/base.py</code>, <code>settings/production.py</code>  and <code>.envs/.production/.django</code> to accomodate these variables</p>
+<p><em>relevant section of base.py</em></p>
+<div class="highlight"><pre><span></span><code>   <span class="n">CELERY_RESULT_BACKEND</span> <span class="o">=</span> <span class="n">env</span><span class="p">.</span><span class="n">str</span><span class="p">(</span><span class="s">&quot;CELERY_RESULT_BACKEND&quot;</span><span class="p">,</span> <span class="err">&quot;</span><span class="n">django</span><span class="o">-</span><span class="n">db</span><span class="err">”</span><span class="p">),</span> 
+   <span class="n">CELERY_TASK_TRACK_STARTED</span> <span class="o">=</span> <span class="n">True</span>
+   <span class="n">CELERY_BROKER_URL</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&#39;CELERY_BROKER_URL&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">env</span><span class="p">(</span><span class="s">&#39;REDIS_URL&#39;</span><span class="p">))</span>
+</code></pre></div>
+
 <p><em>relevant section of production.py</em></p>
 <div class="highlight"><pre><span></span><code><span class="o">#</span> <span class="n">STORAGES</span>
 <span class="o">#</span> <span class="o">------------------------------------------------------------------------------</span>
