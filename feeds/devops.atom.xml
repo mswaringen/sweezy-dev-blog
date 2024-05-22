@@ -1,97 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>sweezy.dev - devops</title><link href="https://sweezy.dev/" rel="alternate"></link><link href="https://sweezy.dev/feeds/devops.atom.xml" rel="self"></link><id>https://sweezy.dev/</id><updated>2024-05-21T16:00:00+01:00</updated><entry><title>Deploying Cookiecutter Django on Fly.io</title><link href="https://sweezy.dev/deploying-cookiecutter-django-on-flyio.html" rel="alternate"></link><published>2024-05-21T16:00:00+01:00</published><updated>2024-05-21T16:00:00+01:00</updated><author><name>Mark Swaringen</name></author><id>tag:sweezy.dev,2024-05-21:/deploying-cookiecutter-django-on-flyio.html</id><summary type="html">&lt;h1&gt;Deploying Cookiecutter Django on Fly.io&lt;/h1&gt;
-&lt;h3&gt;&lt;em&gt;with Celery, Postgres, Redis, and S3 storage with Tigris&lt;/em&gt;&lt;/h3&gt;
-&lt;h2&gt;tl;dr&lt;/h2&gt;
-&lt;p&gt;Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included …&lt;/p&gt;</summary><content type="html">&lt;h1&gt;Deploying Cookiecutter Django on Fly.io&lt;/h1&gt;
-&lt;h3&gt;&lt;em&gt;with Celery, Postgres, Redis, and S3 storage with Tigris&lt;/em&gt;&lt;/h3&gt;
-&lt;h2&gt;tl;dr&lt;/h2&gt;
-&lt;p&gt;Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;Note: We will be using the celery_django_results package to save job status to Postgres and view results in Django Admin. This is used as a replacement for Flower in production.&lt;/p&gt;
-&lt;/blockquote&gt;
+<feed xmlns="http://www.w3.org/2005/Atom"><title>sweezy.dev - devops</title><link href="https://sweezy.dev/" rel="alternate"></link><link href="https://sweezy.dev/feeds/devops.atom.xml" rel="self"></link><id>https://sweezy.dev/</id><updated>2024-05-22T14:00:00+01:00</updated><entry><title>Deploying Cookiecutter Django on Fly.io</title><link href="https://sweezy.dev/deploying-cookiecutter-django-on-flyio.html" rel="alternate"></link><published>2024-05-22T14:00:00+01:00</published><updated>2024-05-22T14:00:00+01:00</updated><author><name>Mark Swaringen</name></author><id>tag:sweezy.dev,2024-05-22:/deploying-cookiecutter-django-on-flyio.html</id><summary type="html">&lt;h4&gt;&lt;em&gt;with Celery, Postgres, Redis, and S3 storage with Tigris&lt;/em&gt;&lt;/h4&gt;
+&lt;p&gt;Cookiecutter Django is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time …&lt;/p&gt;</summary><content type="html">&lt;h4&gt;&lt;em&gt;with Celery, Postgres, Redis, and S3 storage with Tigris&lt;/em&gt;&lt;/h4&gt;
+&lt;p&gt;Cookiecutter Django is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time with configuration.&lt;/p&gt;
 &lt;h2&gt;Steps&lt;/h2&gt;
-&lt;p&gt;1) Generate project locally for Docker&lt;/p&gt;
-&lt;p&gt;2) Add new Dockerfile + fly.toml&lt;/p&gt;
-&lt;p&gt;3) Inject secrets from CLI&lt;/p&gt;
-&lt;p&gt;4) Fly launch + fly deploy&lt;/p&gt;
-&lt;p&gt;Now lets dive in...&lt;/p&gt;
-&lt;h2&gt;1) Generate project locally with Docker&lt;/h2&gt;
-&lt;p&gt;Prereqs: Docker, Cookiecutter&lt;/p&gt;
-&lt;p&gt;Follow the &lt;a href="https://cookiecutter-django.readthedocs.io/en/latest/developing-locally-docker.html"&gt;instructions&lt;/a&gt; to setup a local project with Docker. &lt;/p&gt;
-&lt;h3&gt;&lt;em&gt;Optional&lt;/em&gt;&lt;/h3&gt;
-&lt;h4&gt;&lt;em&gt;A) Create test-task view&lt;/em&gt;&lt;/h4&gt;
-&lt;p&gt;This view will trigger a worker action upon GET request, letting us easily observe the entire system in action.&lt;/p&gt;
-&lt;p&gt;1) Add the following function to &lt;code&gt;config/celery_app.py&lt;/code&gt; &lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="nv"&gt;@app&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;task&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;bind&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="k"&gt;True&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ignore_result&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="k"&gt;False&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="n"&gt;def&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;example_task&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;self&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;span class="err"&gt;:&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="k"&gt;print&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="ss"&gt;&amp;quot;You&amp;#39;ve triggered the example task!&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;2) Create &lt;code&gt;test_views.py&lt;/code&gt; in the &lt;code&gt;config&lt;/code&gt; directory and add the following code&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nn"&gt;django.http&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;HttpResponse&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nn"&gt;.celery_app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;example_task&lt;/span&gt;
-
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="k"&gt;def&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nf"&gt;test_task&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;request&lt;/span&gt;&lt;span class="p"&gt;):&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="n"&gt;example_task&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;delay&lt;/span&gt;&lt;span class="p"&gt;()&lt;/span&gt;
-&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="k"&gt;return&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;HttpResponse&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;Task triggered, see Celery logs&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;3) Now modify &lt;code&gt;url_patterns&lt;/code&gt; in &lt;code&gt;config/urls.py&lt;/code&gt; with the line&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;   path(&amp;quot;test-task/&amp;quot;, test_views.test_task, name=&amp;quot;test_task&amp;quot;),
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;After importing the view with&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="kn"&gt;from&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nn"&gt;config&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kn"&gt;import&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;test_views&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;h4&gt;&lt;em&gt;B) Install &lt;a href="https://github.com/celery/django-celery-results"&gt;celery-django-results&lt;/a&gt;&lt;/em&gt;&lt;/h4&gt;
-&lt;p&gt;This allows us to view the results of Celery worker tasks in the database with Django Admin&lt;/p&gt;
-&lt;p&gt;1) Add &lt;code&gt;django-celery-results==2.5.1&lt;/code&gt; to &lt;code&gt;requirements/base.txt&lt;/code&gt;&lt;/p&gt;
-&lt;p&gt;2) Add &lt;code&gt;"django_celery_results",&lt;/code&gt; to &lt;code&gt;INSTALLED_APPS&lt;/code&gt; in &lt;code&gt;config/settings/base.py&lt;/code&gt;&lt;/p&gt;
-&lt;p&gt;3) Further modify &lt;code&gt;base.py&lt;/code&gt; with the following additions&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;   &lt;span class="n"&gt;CELERY_RESULT_BACKEND&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;str&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;CELERY_RESULT_BACKEND&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="err"&gt;&amp;quot;&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;db&lt;/span&gt;&lt;span class="err"&gt;”&lt;/span&gt;&lt;span class="p"&gt;),&lt;/span&gt; 
-   &lt;span class="n"&gt;CELERY_TASK_TRACK_STARTED&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;True&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;Modify the following line to allow CELERY_BROKER_URL to access REDIS_URL directly (this will be set by Fly automatically)&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;   CELERY_BROKER_URL = env(&amp;#39;CELERY_BROKER_URL&amp;#39;, default=env(&amp;#39;REDIS_URL&amp;#39;))
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;4) Build and migrate&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;   docker compose -f local.yml build
-   docker compose -f local.yml build
-   docker compose -f local.yml run --rm django python manage.py migrate
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;h4&gt;&lt;em&gt;C) Test locally with Flower and Django Admin&lt;/em&gt;&lt;/h4&gt;
-&lt;p&gt;Run the stack and create superuser&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="k"&gt;export&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;COMPOSE_FILE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;local&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;yml&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="n"&gt;docker&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;compose&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;up&lt;/span&gt;
-&lt;span class="w"&gt;   &lt;/span&gt;&lt;span class="n"&gt;docker&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;compose&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;run&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;rm&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;python&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;manage&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;createsuperuser&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;In a browser open up three tabs:&lt;/p&gt;
-&lt;p&gt;1) Flower (Celery worker monitor): &lt;a href="http://localhost:5555/"&gt;http://localhost:5555/&lt;/a&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;&lt;em&gt;Note: the login credentials are set in .envs/.local/.django&lt;/em&gt;&lt;/p&gt;
-&lt;/blockquote&gt;
-&lt;p&gt;2) Django Admin: &lt;a href="http://localhost:8000/admin"&gt;http://localhost:8000/admin&lt;/a&gt;&lt;/p&gt;
-&lt;p&gt;3) Web test-task: &lt;a href="http://localhost:8000/test-task"&gt;http://localhost:8000/test-task&lt;/a&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;The test-task GET request kicks off a worker task. Check the activity in the Flower tab, and then check again in Django Admin under &lt;code&gt;Celery Results / Task Results&lt;/code&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;&lt;em&gt;If you see Task State: SUCCESS you are ready to move to deployment!&lt;/em&gt; &lt;/p&gt;
-&lt;/blockquote&gt;
-&lt;/blockquote&gt;
-&lt;h2&gt;2) Create fly.toml and custom Dockerfile&lt;/h2&gt;
+&lt;p&gt;1) Create/update three config files: &lt;code&gt;fly.toml&lt;/code&gt;, &lt;code&gt;release.sh&lt;/code&gt;, &lt;code&gt;Dockerfile&lt;/code&gt;&lt;/p&gt;
+&lt;p&gt;2) Modify settings to accept Fly-provided secrets&lt;/p&gt;
+&lt;p&gt;3) &lt;code&gt;fly launch&lt;/code&gt; &amp;amp; import secrets&lt;/p&gt;
+&lt;p&gt;4) (Optional) Deploy via GH Actions&lt;/p&gt;
+&lt;p&gt;Lets go!&lt;/p&gt;
+&lt;h2&gt;1) Create fly.toml, release script, Dockerfile&lt;/h2&gt;
 &lt;p&gt;&lt;em&gt;&lt;a href="https://fly.io/docs/apps/launch/"&gt;Full description&lt;/a&gt; of the Fly launch and deploy process&lt;/em&gt;&lt;/p&gt;
-&lt;p&gt;Prereqs: flytmcl&lt;/p&gt;
-&lt;p&gt;Running &lt;code&gt;fly launch&lt;/code&gt; will create generic fly.toml and Dockerfile required for deployment, however we need custom files for Cookiecutter Django&lt;/p&gt;
-&lt;h3&gt;Custom Dockerfile&lt;/h3&gt;
-&lt;p&gt;This is a version of the Dockerfile found in &lt;code&gt;compose/production/django/Dockerfile&lt;/code&gt; modified to fit Fly's build process.&lt;/p&gt;
+&lt;p&gt;Before running &lt;code&gt;fly launch&lt;/code&gt; create your own &lt;code&gt;fly.toml&lt;/code&gt;, &lt;code&gt;release.sh&lt;/code&gt;, and &lt;code&gt;Dockerfile&lt;/code&gt;. All three should be in the project root directory.&lt;/p&gt;
+&lt;h3&gt;Custom fly.toml&lt;/h3&gt;
+&lt;p&gt;As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run a custom release script.&lt;/p&gt;
+&lt;p&gt;The following variables require user input: &lt;code&gt;app, primary_region&lt;/code&gt;&lt;/p&gt;
 &lt;blockquote&gt;
-&lt;p&gt;add notes about injecting dummy vars to run collect&lt;/p&gt;
+&lt;p&gt;Note the number of workers can be set under &lt;code&gt;processes/app&lt;/code&gt; (default is 1)&lt;/p&gt;
 &lt;/blockquote&gt;
+&lt;p&gt;&lt;em&gt;fly.toml&lt;/em&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;fly-cookiecutter-django-2&amp;#39;&lt;/span&gt;
+&lt;span class="n"&gt;primary_region&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;mad&amp;#39;&lt;/span&gt;
+&lt;span class="n"&gt;console_command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/code/manage.py shell&amp;#39;&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;build&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;deploy&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;release_command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;sh /code/release.sh&amp;#39;&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;PORT&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;8000&amp;#39;&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;processes&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;python -m gunicorn --bind :8000 --workers 1 config.wsgi&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;worker&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;python -m celery -A config.celery_app:app worker -l DEBUG&amp;#39;&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;http_service&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;internal_port&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;8000&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;force_https&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;auto_stop_machines&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;auto_start_machines&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;min_machines_running&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;processes&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;&amp;#39;app&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;[vm&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;&lt;span class="err"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;memory&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;1gb&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;cpu_kind&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;shared&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;cpus&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;
+
+&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;[statics&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;&lt;span class="err"&gt;]&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;guest_path&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/code/static&amp;#39;&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;url_prefix&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/static/&amp;#39;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h3&gt;Release script&lt;/h3&gt;
+&lt;p&gt;We need to run both &lt;code&gt;collectstatic&lt;/code&gt; and &lt;code&gt;migrate&lt;/code&gt; as release commands, thus we need a script. &lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;The release_command is done in a pre-deploy VM that has access to production environment variables&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;&lt;em&gt;release.sh&lt;/em&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="ch"&gt;#!/usr/bin/env sh&lt;/span&gt;
+
+python&lt;span class="w"&gt; &lt;/span&gt;manage.py&lt;span class="w"&gt; &lt;/span&gt;collectstatic&lt;span class="w"&gt; &lt;/span&gt;--noinput&lt;span class="w"&gt; &lt;/span&gt;
+python&lt;span class="w"&gt; &lt;/span&gt;manage.py&lt;span class="w"&gt; &lt;/span&gt;migrate
+
+&lt;span class="c1"&gt;# exit 123&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h3&gt;Custom Dockerfile&lt;/h3&gt;
+&lt;p&gt;This is a version of the Dockerfile found in &lt;code&gt;compose/production/django/Dockerfile&lt;/code&gt;, the main change is to remove the entrypoint scripts.&lt;/p&gt;
 &lt;p&gt;&lt;em&gt;Dockerfile&lt;/em&gt;&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="c1"&gt;# define an alias for the specific python version used in this file.&lt;/span&gt;
 &lt;span class="n"&gt;FROM&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;docker&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;python&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="mf"&gt;3.12&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="mi"&gt;3&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;slim&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;bookworm&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;as&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;python&lt;/span&gt;
@@ -152,102 +128,118 @@
 
 &lt;span class="n"&gt;COPY&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;code&lt;/span&gt;
 
-&lt;span class="c1"&gt;# Set dummy vars for building purposes&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_SETTINGS_MODULE&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;config.settings.production&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DATABASE_URL&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_SECRET_KEY&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;non-secret-key-for-building-purposes&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;REDIS_URL&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_ADMIN_URL&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_ALLOWED_HOSTS&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;MAILJET_API_KEY&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;MAILJET_SECRET_KEY&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;SENTRY_DSN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_AWS_ACCESS_KEY_ID&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_AWS_SECRET_ACCESS_KEY&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-&lt;span class="n"&gt;ENV&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;DJANGO_AWS_STORAGE_BUCKET_NAME&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;temp&amp;quot;&lt;/span&gt;
-
-&lt;span class="n"&gt;RUN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;python&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;manage&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="n"&gt;py&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;collectstatic&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;noinput&lt;/span&gt;
-
 &lt;span class="n"&gt;EXPOSE&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;8000&lt;/span&gt;
 
 &lt;span class="n"&gt;CMD&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;gunicorn&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;--bind&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;:8000&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;--workers&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;1&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s2"&gt;&amp;quot;config.wsgi&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;h3&gt;Custom fly.toml&lt;/h3&gt;
-&lt;p&gt;As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run migrate on deploy.&lt;/p&gt;
-&lt;p&gt;The following variables require user input: &lt;code&gt;app, primary_region&lt;/code&gt;&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;Note the number of workers can be set under &lt;code&gt;processes/app&lt;/code&gt; (default is 1)&lt;/p&gt;
-&lt;/blockquote&gt;
-&lt;p&gt;&lt;em&gt;fly.toml&lt;/em&gt;&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="err"&gt;#&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;fly&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;toml&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;configuration&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;file&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;generated&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;fly&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;cookiecutter&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;on&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;2024&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="mi"&gt;05&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="mi"&gt;01&lt;/span&gt;&lt;span class="nl"&gt;T15&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="mi"&gt;44&lt;/span&gt;&lt;span class="err"&gt;:&lt;/span&gt;&lt;span class="mi"&gt;30&lt;/span&gt;&lt;span class="o"&gt;+&lt;/span&gt;&lt;span class="mi"&gt;01&lt;/span&gt;&lt;span class="err"&gt;:&lt;/span&gt;&lt;span class="mi"&gt;00&lt;/span&gt;
-&lt;span class="err"&gt;#&lt;/span&gt;
-&lt;span class="err"&gt;#&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;See&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nl"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;fly&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;docs&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;reference&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;configuration&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;information&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;about&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;how&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;to&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;use&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;this&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;file&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;
-&lt;span class="err"&gt;#&lt;/span&gt;
+&lt;h2&gt;2) Modify settings to accept Fly-assigned environment variables&lt;/h2&gt;
+&lt;p&gt;Fly will automatically assign several environment variables as you add services&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="n"&gt;DATABASE_URL&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Postgres&lt;/span&gt;
+&lt;span class="n"&gt;REDIS_URL&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Redis&lt;/span&gt;
 
-&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;fly-cookiecutter-django-1&amp;#39;&lt;/span&gt;
-&lt;span class="n"&gt;primary_region&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;mad&amp;#39;&lt;/span&gt;
-&lt;span class="n"&gt;console_command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/code/manage.py shell&amp;#39;&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;build&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;deploy&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;release_command&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;python manage.py migrate&amp;#39;&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;PORT&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;8000&amp;#39;&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;processes&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;app&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;python -m gunicorn --bind :8000 --workers 1 config.wsgi&amp;#39;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;worker&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;python -m celery -A config.celery_app:app worker -l DEBUG&amp;#39;&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;http_service&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;internal_port&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;8000&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;force_https&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;auto_stop_machines&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;auto_start_machines&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;true&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;min_machines_running&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;0&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;processes&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;&amp;#39;app&amp;#39;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;[vm&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;&lt;span class="err"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;memory&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;1gb&amp;#39;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;cpu_kind&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;shared&amp;#39;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;cpus&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="mi"&gt;1&lt;/span&gt;
-
-&lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="n"&gt;[statics&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;&lt;span class="err"&gt;]&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;guest_path&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/code/static&amp;#39;&lt;/span&gt;
-&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;url_prefix&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;/static/&amp;#39;&lt;/span&gt;
+&lt;span class="n"&gt;AWS_REGION&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Tigris&lt;/span&gt;
+&lt;span class="n"&gt;AWS_ENDPOINT_URL_S3&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Tigris&lt;/span&gt;
+&lt;span class="n"&gt;AWS_ACCESS_KEY_ID&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Tigris&lt;/span&gt;
+&lt;span class="n"&gt;AWS_SECRET_ACCESS_KEY&lt;/span&gt; &lt;span class="o"&gt;-&lt;/span&gt; &lt;span class="n"&gt;Tigris&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;h2&gt;3) Launch and Deploy&lt;/h2&gt;
-&lt;h3&gt;Launch&lt;/h3&gt;
+&lt;p&gt;Modify both &lt;code&gt;settings/production.py&lt;/code&gt; and &lt;code&gt;.envs/.production/.django&lt;/code&gt; to accomodate these variables&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;relevant section of production.py&lt;/em&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;STORAGES&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="o"&gt;------------------------------------------------------------------------------&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/#&lt;/span&gt;&lt;span class="n"&gt;installation&lt;/span&gt;
+&lt;span class="n"&gt;INSTALLED_APPS&lt;/span&gt; &lt;span class="o"&gt;+=&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;storages&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_ACCESS_KEY_ID&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;DJANGO_AWS_ACCESS_KEY_ID&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AWS_ACCESS_KEY_ID&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_SECRET_ACCESS_KEY&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;DJANGO_AWS_SECRET_ACCESS_KEY&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AWS_SECRET_ACCESS_KEY&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_STORAGE_BUCKET_NAME&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;DJANGO_AWS_STORAGE_BUCKET_NAME&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;BUCKET_NAME&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_QUERYSTRING_AUTH&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;False&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="kr"&gt;DO&lt;/span&gt; &lt;span class="n"&gt;NOT&lt;/span&gt; &lt;span class="n"&gt;change&lt;/span&gt; &lt;span class="n"&gt;these&lt;/span&gt; &lt;span class="n"&gt;unless&lt;/span&gt; &lt;span class="n"&gt;you&lt;/span&gt; &lt;span class="n"&gt;know&lt;/span&gt; &lt;span class="n"&gt;what&lt;/span&gt; &lt;span class="n"&gt;you&lt;/span&gt;&lt;span class="err"&gt;&amp;#39;&lt;/span&gt;&lt;span class="n"&gt;re&lt;/span&gt; &lt;span class="n"&gt;doing&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;
+&lt;span class="n"&gt;_AWS_EXPIRY&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;60&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;24&lt;/span&gt; &lt;span class="o"&gt;*&lt;/span&gt; &lt;span class="mi"&gt;7&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_S3_OBJECT_PARAMETERS&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;CacheControl&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="n"&gt;f&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;max-age={_AWS_EXPIRY}, s-maxage={_AWS_EXPIRY}, must-revalidate&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;span class="p"&gt;}&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_S3_MAX_MEMORY_SIZE&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;int&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;
+    &lt;span class="s"&gt;&amp;quot;DJANGO_AWS_S3_MAX_MEMORY_SIZE&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+    &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="mi"&gt;100&lt;/span&gt;&lt;span class="n"&gt;_000_000&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;  &lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="mi"&gt;100&lt;/span&gt;&lt;span class="n"&gt;MB&lt;/span&gt;
+&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;settings&lt;/span&gt;
+&lt;span class="n"&gt;AWS_S3_REGION_NAME&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;DJANGO_AWS_S3_REGION_NAME&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AWS_REGION&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;https&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="o"&gt;//&lt;/span&gt;&lt;span class="n"&gt;django&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;storages&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;readthedocs&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;io&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;en&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;backends&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;amazon&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;S3&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;html&lt;/span&gt;&lt;span class="o"&gt;#&lt;/span&gt;&lt;span class="n"&gt;cloudfront&lt;/span&gt;
+&lt;span class="n"&gt;AWS_S3_ENDPOINT_URL&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;AWS_ENDPOINT_URL_S3&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+&lt;span class="n"&gt;AWS_S3_CUSTOM_DOMAIN&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;DJANGO_AWS_S3_CUSTOM_DOMAIN&amp;quot;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="n"&gt;default&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="n"&gt;None&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+
+&lt;span class="o"&gt;#&lt;/span&gt; &lt;span class="n"&gt;Parse&lt;/span&gt; &lt;span class="n"&gt;the&lt;/span&gt; &lt;span class="n"&gt;endpoint&lt;/span&gt; &lt;span class="n"&gt;URL&lt;/span&gt; &lt;span class="n"&gt;to&lt;/span&gt; &lt;span class="n"&gt;get&lt;/span&gt; &lt;span class="n"&gt;the&lt;/span&gt; &lt;span class="n"&gt;domain&lt;/span&gt; &lt;span class="n"&gt;without&lt;/span&gt; &lt;span class="n"&gt;protocol&lt;/span&gt;
+&lt;span class="n"&gt;if&lt;/span&gt; &lt;span class="n"&gt;AWS_S3_ENDPOINT_URL&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;parsed_url&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;urlparse&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="n"&gt;AWS_S3_ENDPOINT_URL&lt;/span&gt;&lt;span class="p"&gt;)&lt;/span&gt;
+    &lt;span class="n"&gt;endpoint_domain&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;parsed_url&lt;/span&gt;&lt;span class="p"&gt;.&lt;/span&gt;&lt;span class="n"&gt;netloc&lt;/span&gt;
+&lt;span class="n"&gt;else&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;
+    &lt;span class="n"&gt;endpoint_domain&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;None&lt;/span&gt;
+
+&lt;span class="n"&gt;aws_s3_domain&lt;/span&gt; &lt;span class="o"&gt;=&lt;/span&gt; &lt;span class="n"&gt;AWS_S3_CUSTOM_DOMAIN&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;endpoint_domain&lt;/span&gt; &lt;span class="n"&gt;or&lt;/span&gt; &lt;span class="n"&gt;f&lt;/span&gt;&lt;span class="s"&gt;&amp;quot;{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com&amp;quot;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;em&gt;relevant section of .envs/.production/.django&lt;/em&gt;&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="c"&gt;# comment out these vars&lt;/span&gt;
+
+&lt;span class="c"&gt;# AWS&lt;/span&gt;
+&lt;span class="c"&gt;# &lt;/span&gt;&lt;span class="nb"&gt;------------------------------------------------------------------------------&lt;/span&gt;
+&lt;span class="c"&gt;# DJANGO_AWS_ACCESS_KEY_ID=&lt;/span&gt;
+&lt;span class="c"&gt;# DJANGO_AWS_SECRET_ACCESS_KEY=&lt;/span&gt;
+&lt;span class="c"&gt;# DJANGO_AWS_STORAGE_BUCKET_NAME=&lt;/span&gt;
+
+&lt;span class="c"&gt;# Redis&lt;/span&gt;
+&lt;span class="c"&gt;# &lt;/span&gt;&lt;span class="nb"&gt;------------------------------------------------------------------------------&lt;/span&gt;
+&lt;span class="c"&gt;# REDIS_URL=&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;h2&gt;3) Launch and Import Secrets&lt;/h2&gt;
+&lt;h3&gt;Launch wizard&lt;/h3&gt;
 &lt;p&gt;Run &lt;code&gt;fly launch&lt;/code&gt; from the root directory&lt;/p&gt;
-&lt;p&gt;&lt;em&gt;Launch wizard&lt;/em&gt;&lt;/p&gt;
 &lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;- YES to copy config to new app
 - NO to overwriting Dockerfile
-- YES to modifying configuration, click to open setting page, select Postgres and Redis instances
+- YES to modifying configuration, click to open setting page, select Postgres, Redis, Tigris
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
 &lt;h3&gt;Import secrets&lt;/h3&gt;
-&lt;ul&gt;
-&lt;li&gt;DATABASE_URL and REDIS_URL are set by &lt;code&gt;fly launch&lt;/code&gt;, all others need to be imported&lt;/li&gt;
-&lt;li&gt;Modify &lt;code&gt;.envs/.production/.django&lt;/code&gt; as needed, if a service isnt ready just leave a temp value&lt;/li&gt;
-&lt;li&gt;You must comment out &lt;code&gt;REDIS_URL&lt;/code&gt;&lt;/li&gt;
-&lt;/ul&gt;
 &lt;p&gt;Run the following command to import the secrets to Fly:&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;cat .envs/.production/.django | fly secrets import&lt;/code&gt;&lt;/p&gt;
-&lt;h3&gt;Deploy&lt;/h3&gt;
+&lt;h3&gt;First Deploy&lt;/h3&gt;
 &lt;p&gt;Run &lt;code&gt;fly deploy&lt;/code&gt;&lt;/p&gt;
-&lt;p&gt;If deployment was successful, create a superuser via ssh console&lt;/p&gt;
-&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;fly ssh console
-python manage.py createsuperuser
+&lt;p&gt;If deployment was successful, create a superuser via &lt;code&gt;fly ssh console&lt;/code&gt;&lt;/p&gt;
+&lt;h2&gt;4) (Optional) Deploy with Github Actions&lt;/h2&gt;
+&lt;p&gt;&lt;em&gt;Fly docs on &lt;a href="https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/"&gt;Deploy with Github Actions&lt;/a&gt;&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;1) From the project source directory, get a Fly API deploy token by running &lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;fly tokens create deploy -x 999999h
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;Now open tabs for Django Admin and test-task to verify the system is working.&lt;/p&gt;
-&lt;hr&gt;
-&lt;h4&gt;If you've gotten this far congratulations you are now live on Fly.io!&lt;/h4&gt;
-&lt;h3&gt;Resources&lt;/h3&gt;
-&lt;ul&gt;
-&lt;li&gt;&lt;a href="https://github.com/mswaringen/fly-cookiecutter-django"&gt;Example code on Github&lt;/a&gt;&lt;/li&gt;
-&lt;li&gt;&lt;a href="https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/"&gt;Deploy with Github Actions&lt;/a&gt;  &lt;/li&gt;
-&lt;/ul&gt;</content><category term="devops"></category></entry></feed>
+&lt;p&gt;Copy the output, including the FlyV1 and space at the beginning.&lt;/p&gt;
+&lt;p&gt;2) Go to your repository on GitHub and select Settings. Under Secrets and variables, select Actions, and then create a new repository secret called FLY_API_TOKEN, paste the value previously created in step 1.&lt;/p&gt;
+&lt;p&gt;3) Back in your project source directory, create &lt;code&gt;.github/workflows/fly.yml&lt;/code&gt; with these contents:&lt;/p&gt;
+&lt;div class="highlight"&gt;&lt;pre&gt;&lt;span&gt;&lt;/span&gt;&lt;code&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;Fly&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;Deploy&lt;/span&gt;
+&lt;span class="n"&gt;on&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;push&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;branches&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;master&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="err"&gt;#&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;change&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;to&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;main&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="k"&gt;if&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;needed&lt;/span&gt;
+&lt;span class="n"&gt;jobs&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;  &lt;/span&gt;&lt;span class="n"&gt;deploy&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;name&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;Deploy&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;app&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;runs&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;on&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ubuntu&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;latest&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;concurrency&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;deploy&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;group&lt;/span&gt;&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="err"&gt;#&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;optional&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;ensure&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;only&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;one&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;action&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;runs&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;at&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;a&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;time&lt;/span&gt;
+&lt;span class="w"&gt;    &lt;/span&gt;&lt;span class="n"&gt;steps&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;uses&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;actions&lt;/span&gt;&lt;span class="o"&gt;/&lt;/span&gt;&lt;span class="n"&gt;checkout&lt;/span&gt;&lt;span class="err"&gt;@&lt;/span&gt;&lt;span class="n"&gt;v4&lt;/span&gt;
+&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;uses&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;superfly&lt;/span&gt;&lt;span class="sr"&gt;/flyctl-actions/s&lt;/span&gt;&lt;span class="n"&gt;etup&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;flyctl&lt;/span&gt;&lt;span class="err"&gt;@&lt;/span&gt;&lt;span class="n"&gt;master&lt;/span&gt;
+&lt;span class="w"&gt;      &lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;run&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;flyctl&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;deploy&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;--&lt;/span&gt;&lt;span class="n"&gt;remote&lt;/span&gt;&lt;span class="o"&gt;-&lt;/span&gt;&lt;span class="n"&gt;only&lt;/span&gt;
+&lt;span class="w"&gt;        &lt;/span&gt;&lt;span class="n"&gt;env&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;
+&lt;span class="w"&gt;          &lt;/span&gt;&lt;span class="n"&gt;FLY_API_TOKEN&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;$&lt;/span&gt;&lt;span class="o"&gt;{{&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="n"&gt;secrets&lt;/span&gt;&lt;span class="o"&gt;.&lt;/span&gt;&lt;span class="na"&gt;FLY_API_TOKEN&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;}}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;4) Push changes to start automatic deployment&lt;/p&gt;
+&lt;h2&gt;Example Code&lt;/h2&gt;
+&lt;p&gt;Stuck on something? Check out the &lt;a href="https://github.com/mswaringen/fly-cookiecutter-django"&gt;Example code on Github&lt;/a&gt;&lt;/p&gt;</content><category term="devops"></category></entry></feed>

@@ -1,137 +1,93 @@
 Title: Deploying Cookiecutter Django on Fly.io
-Date: 2024-5-21 16:00
+Date: 2024-5-22 14:00
 Category: devops
 
-# Deploying Cookiecutter Django on Fly.io
-### _with Celery, Postgres, Redis, and S3 storage with Tigris_
+#### _with Celery, Postgres, Redis, and S3 storage with Tigris_
+
+Cookiecutter Django is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time with configuration.
 
 
-
-## tl;dr
-Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)
-
-> Note: We will be using the celery_django_results package to save job status to Postgres and view results in Django Admin. This is used as a replacement for Flower in production.
 
 ## Steps
 
-1) Generate project locally for Docker
+1) Create/update three config files: `fly.toml`, `release.sh`, `Dockerfile`
 
-2) Add new Dockerfile + fly.toml
+2) Modify settings to accept Fly-provided secrets
 
-3) Inject secrets from CLI
+3) `fly launch` & import secrets
 
-4) Fly launch + fly deploy
-
-
-Now lets dive in...
-
-## 1) Generate project locally with Docker
-
-Prereqs: Docker, Cookiecutter
-
-Follow the [instructions](https://cookiecutter-django.readthedocs.io/en/latest/developing-locally-docker.html) to setup a local project with Docker. 
-
-### _Optional_ 
-
-#### _A) Create test-task view_
-
-This view will trigger a worker action upon GET request, letting us easily observe the entire system in action.
-
-1) Add the following function to `config/celery_app.py` 
-
-```
-   @app.task(bind=True, ignore_result=False)
-   def example_task(self):
-      print("You've triggered the example task!")
-```
-
-2) Create `test_views.py` in the `config` directory and add the following code
-
-```
-   from django.http import HttpResponse
-   from .celery_app import example_task
-
-   def test_task(request):
-      example_task.delay()
-      return HttpResponse("Task triggered, see Celery logs")
-```
-
-3) Now modify `url_patterns ` in `config/urls.py` with the line
-
-```
-   path("test-task/", test_views.test_task, name="test_task"),
-```
-
-   After importing the view with
-
-```
-   from config import test_views
-```
-
-#### _B) Install [celery-django-results](https://github.com/celery/django-celery-results)_
-This allows us to view the results of Celery worker tasks in the database with Django Admin
-
-1) Add `django-celery-results==2.5.1` to `requirements/base.txt`
-
-2) Add `"django_celery_results",` to `INSTALLED_APPS` in `config/settings/base.py`
-
-3) Further modify `base.py` with the following additions
-
-```
-   CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND", "django-db”), 
-   CELERY_TASK_TRACK_STARTED = True
-```
-
-   Modify the following line to allow CELERY_BROKER_URL to access REDIS_URL directly (this will be set by Fly automatically)
-
-```
-   CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=env('REDIS_URL'))
-```
+4) (Optional) Deploy via GH Actions
 
 
-4) Build and migrate
+Lets go!
 
-```
-   docker compose -f local.yml build
-   docker compose -f local.yml build
-   docker compose -f local.yml run --rm django python manage.py migrate
-```
 
-#### _C) Test locally with Flower and Django Admin_
-
-Run the stack and create superuser
-
-```
-   export COMPOSE_FILE=local.yml
-   docker compose up
-   docker compose run --rm django python manage.py createsuperuser
-```
-
-In a browser open up three tabs:
-
-   1) Flower (Celery worker monitor): [http://localhost:5555/](http://localhost:5555/)
-   > _Note: the login credentials are set in .envs/.local/.django_
-
-   2) Django Admin: [http://localhost:8000/admin](http://localhost:8000/admin)
-
-   3) Web test-task: [http://localhost:8000/test-task](http://localhost:8000/test-task)
-
-> The test-task GET request kicks off a worker task. Check the activity in the Flower tab, and then check again in Django Admin under `Celery Results / Task Results`
->> _If you see Task State: SUCCESS you are ready to move to deployment!_ 
-
-## 2) Create fly.toml and custom Dockerfile
+## 1) Create fly.toml, release script, Dockerfile
 
 _[Full description](https://fly.io/docs/apps/launch/) of the Fly launch and deploy process_
 
-Prereqs: flytmcl
+Before running `fly launch` create your own `fly.toml`, `release.sh`, and `Dockerfile`. All three should be in the project root directory.
 
-Running `fly launch` will create generic fly.toml and Dockerfile required for deployment, however we need custom files for Cookiecutter Django
+### Custom fly.toml
 
+As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run a custom release script.
+
+The following variables require user input: `app, primary_region`
+> Note the number of workers can be set under `processes/app` (default is 1)
+
+_fly.toml_
+```
+app = 'fly-cookiecutter-django-2'
+primary_region = 'mad'
+console_command = '/code/manage.py shell'
+
+[build]
+
+[deploy]
+  release_command = 'sh /code/release.sh'
+
+[env]
+  PORT = '8000'
+
+[processes]
+  app = 'python -m gunicorn --bind :8000 --workers 1 config.wsgi'
+  worker = 'python -m celery -A config.celery_app:app worker -l DEBUG'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[statics]]
+  guest_path = '/code/static'
+  url_prefix = '/static/'
+
+```
+
+### Release script
+We need to run both `collectstatic` and `migrate` as release commands, thus we need a script. 
+> The release_command is done in a pre-deploy VM that has access to production environment variables
+
+_release.sh_
+```
+#!/usr/bin/env sh
+
+python manage.py collectstatic --noinput 
+python manage.py migrate
+
+# exit 123
+```
 ### Custom Dockerfile
 
-This is a version of the Dockerfile found in `compose/production/django/Dockerfile` modified to fit Fly's build process.
-
-> add notes about injecting dummy vars to run collect
+This is a version of the Dockerfile found in `compose/production/django/Dockerfile`, the main change is to remove the entrypoint scripts.
 
 _Dockerfile_
 ```
@@ -194,117 +150,141 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/* \
 
 COPY . /code
 
-# Set dummy vars for building purposes
-ENV DJANGO_SETTINGS_MODULE "config.settings.production"
-ENV DATABASE_URL "temp"
-ENV DJANGO_SECRET_KEY "non-secret-key-for-building-purposes"
-ENV REDIS_URL "temp"
-ENV DJANGO_ADMIN_URL "temp"
-ENV DJANGO_ALLOWED_HOSTS "temp"
-ENV MAILJET_API_KEY "temp"
-ENV MAILJET_SECRET_KEY "temp"
-ENV SENTRY_DSN ""
-ENV DJANGO_AWS_ACCESS_KEY_ID "temp"
-ENV DJANGO_AWS_SECRET_ACCESS_KEY "temp"
-ENV DJANGO_AWS_STORAGE_BUCKET_NAME "temp"
-
-RUN python manage.py collectstatic --noinput
-
 EXPOSE 8000
 
 CMD ["gunicorn", "--bind", ":8000", "--workers", "1", "config.wsgi"]
-
 ```
 
-### Custom fly.toml
+## 2) Modify settings to accept Fly-assigned environment variables
 
-As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run migrate on deploy.
-
-The following variables require user input: `app, primary_region`
-> Note the number of workers can be set under `processes/app` (default is 1)
-
-_fly.toml_
+Fly will automatically assign several environment variables as you add services
 ```
-# fly.toml app configuration file generated for fly-cookiecutter-django-1 on 2024-05-01T15:44:30+01:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+DATABASE_URL - Postgres
+REDIS_URL - Redis
 
-app = 'fly-cookiecutter-django-1'
-primary_region = 'mad'
-console_command = '/code/manage.py shell'
-
-[build]
-
-[deploy]
-  release_command = 'python manage.py migrate'
-
-[env]
-  PORT = '8000'
-
-[processes]
-  app = 'python -m gunicorn --bind :8000 --workers 1 config.wsgi'
-  worker = 'python -m celery -A config.celery_app:app worker -l DEBUG'
-
-[http_service]
-  internal_port = 8000
-  force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
-
-[[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
-  cpus = 1
-
-[[statics]]
-  guest_path = '/code/static'
-  url_prefix = '/static/'
-
+AWS_REGION - Tigris
+AWS_ENDPOINT_URL_S3 - Tigris
+AWS_ACCESS_KEY_ID - Tigris
+AWS_SECRET_ACCESS_KEY - Tigris
 ```
 
-## 3) Launch and Deploy
+Modify both `settings/production.py` and `.envs/.production/.django` to accomodate these variables
 
-### Launch
+_relevant section of production.py_
+```
+# STORAGES
+# ------------------------------------------------------------------------------
+# https://django-storages.readthedocs.io/en/latest/#installation
+INSTALLED_APPS += ["storages"]
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_ACCESS_KEY_ID = env("DJANGO_AWS_ACCESS_KEY_ID", default=None) or env("AWS_ACCESS_KEY_ID", default=None)
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_SECRET_ACCESS_KEY = env("DJANGO_AWS_SECRET_ACCESS_KEY", default=None) or env("AWS_SECRET_ACCESS_KEY", default=None)
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_STORAGE_BUCKET_NAME = env("DJANGO_AWS_STORAGE_BUCKET_NAME", default=None) or env("BUCKET_NAME", default=None)
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_QUERYSTRING_AUTH = False
+# DO NOT change these unless you know what you're doing.
+_AWS_EXPIRY = 60 * 60 * 24 * 7
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_S3_OBJECT_PARAMETERS = {
+    "CacheControl": f"max-age={_AWS_EXPIRY}, s-maxage={_AWS_EXPIRY}, must-revalidate",
+}
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_S3_MAX_MEMORY_SIZE = env.int(
+    "DJANGO_AWS_S3_MAX_MEMORY_SIZE",
+    default=100_000_000,  # 100MB
+)
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#settings
+AWS_S3_REGION_NAME = env("DJANGO_AWS_S3_REGION_NAME", default=None) or env("AWS_REGION", default=None)
+# https://django-storages.readthedocs.io/en/latest/backends/amazon-S3.html#cloudfront
+AWS_S3_ENDPOINT_URL = env("AWS_ENDPOINT_URL_S3", default=None)
+AWS_S3_CUSTOM_DOMAIN = env("DJANGO_AWS_S3_CUSTOM_DOMAIN", default=None)
+
+# Parse the endpoint URL to get the domain without protocol
+if AWS_S3_ENDPOINT_URL:
+    parsed_url = urlparse(AWS_S3_ENDPOINT_URL)
+    endpoint_domain = parsed_url.netloc
+else:
+    endpoint_domain = None
+
+aws_s3_domain = AWS_S3_CUSTOM_DOMAIN or endpoint_domain or f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
+```
+
+_relevant section of .envs/.production/.django_
+```
+# comment out these vars
+
+# AWS
+# ------------------------------------------------------------------------------
+# DJANGO_AWS_ACCESS_KEY_ID=
+# DJANGO_AWS_SECRET_ACCESS_KEY=
+# DJANGO_AWS_STORAGE_BUCKET_NAME=
+
+# Redis
+# ------------------------------------------------------------------------------
+# REDIS_URL=
+```
+
+## 3) Launch and Import Secrets
+
+### Launch wizard
 Run `fly launch` from the root directory
 
-_Launch wizard_
 ```
 - YES to copy config to new app
 - NO to overwriting Dockerfile
-- YES to modifying configuration, click to open setting page, select Postgres and Redis instances
+- YES to modifying configuration, click to open setting page, select Postgres, Redis, Tigris
 ```
 
 ### Import secrets
-- DATABASE_URL and REDIS_URL are set by `fly launch`, all others need to be imported
-- Modify `.envs/.production/.django` as needed, if a service isnt ready just leave a temp value
-- You must comment out `REDIS_URL`
-
 Run the following command to import the secrets to Fly:
 
    ```
    cat .envs/.production/.django | fly secrets import
    ```
 
-### Deploy
+### First Deploy
 
 Run `fly deploy`
 
-If deployment was successful, create a superuser via ssh console
+If deployment was successful, create a superuser via `fly ssh console`
+
+## 4) (Optional) Deploy with Github Actions
+_Fly docs on [Deploy with Github Actions](https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/)_
+
+1) From the project source directory, get a Fly API deploy token by running 
 
 ```
-fly ssh console
-python manage.py createsuperuser
+fly tokens create deploy -x 999999h
 ```
 
-Now open tabs for Django Admin and test-task to verify the system is working.
+Copy the output, including the FlyV1 and space at the beginning.
 
---------------------
+2) Go to your repository on GitHub and select Settings. Under Secrets and variables, select Actions, and then create a new repository secret called FLY_API_TOKEN, paste the value previously created in step 1.
 
-#### If you've gotten this far congratulations you are now live on Fly.io!
+3) Back in your project source directory, create `.github/workflows/fly.yml` with these contents:
+```
+name: Fly Deploy
+on:
+  push:
+    branches:
+      - master    # change to main if needed
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-### Resources
-- [Example code on Github](https://github.com/mswaringen/fly-cookiecutter-django)
-- [Deploy with Github Actions](https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/)  
+```
+
+4) Push changes to start automatic deployment
+
+## Example Code
+Stuck on something? Check out the [Example code on Github](https://github.com/mswaringen/fly-cookiecutter-django)

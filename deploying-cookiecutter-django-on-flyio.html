@@ -5,7 +5,7 @@
         <meta charset="utf-8" />
         <meta name="generator" content="Pelican" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css" />
+        <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.min.css" />
         <link href="https://sweezy.dev/feeds/all.atom.xml" type="application/atom+xml" rel="alternate" title="sweezy.dev Full Atom Feed" />
         <link href="https://sweezy.dev/feeds/devops.atom.xml" type="application/atom+xml" rel="alternate" title="sweezy.dev Categories Atom Feed" />
 
@@ -31,96 +31,74 @@
          title="Permalink to Deploying Cookiecutter Django on Fly.io">Deploying Cookiecutter Django on Fly.io</a></h2>
  
   </header>
-  <h1>Deploying Cookiecutter Django on Fly.io</h1>
-<h3><em>with Celery, Postgres, Redis, and S3 storage with Tigris</em></h3>
-<h2>tl;dr</h2>
-<p>Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)</p>
-<blockquote>
-<p>Note: We will be using the celery_django_results package to save job status to Postgres and view results in Django Admin. This is used as a replacement for Flower in production.</p>
-</blockquote>
+  <h4><em>with Celery, Postgres, Redis, and S3 storage with Tigris</em></h4>
+<p>Cookiecutter Django is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time with configuration.</p>
 <h2>Steps</h2>
-<p>1) Generate project locally for Docker</p>
-<p>2) Add new Dockerfile + fly.toml</p>
-<p>3) Inject secrets from CLI</p>
-<p>4) Fly launch + fly deploy</p>
-<p>Now lets dive in...</p>
-<h2>1) Generate project locally with Docker</h2>
-<p>Prereqs: Docker, Cookiecutter</p>
-<p>Follow the <a href="https://cookiecutter-django.readthedocs.io/en/latest/developing-locally-docker.html">instructions</a> to setup a local project with Docker. </p>
-<h3><em>Optional</em></h3>
-<h4><em>A) Create test-task view</em></h4>
-<p>This view will trigger a worker action upon GET request, letting us easily observe the entire system in action.</p>
-<p>1) Add the following function to <code>config/celery_app.py</code> </p>
-<div class="highlight"><pre><span></span><code><span class="w">   </span><span class="nv">@app</span><span class="p">.</span><span class="n">task</span><span class="p">(</span><span class="n">bind</span><span class="o">=</span><span class="k">True</span><span class="p">,</span><span class="w"> </span><span class="n">ignore_result</span><span class="o">=</span><span class="k">False</span><span class="p">)</span>
-<span class="w">   </span><span class="n">def</span><span class="w"> </span><span class="n">example_task</span><span class="p">(</span><span class="n">self</span><span class="p">)</span><span class="err">:</span>
-<span class="w">      </span><span class="k">print</span><span class="p">(</span><span class="ss">&quot;You&#39;ve triggered the example task!&quot;</span><span class="p">)</span>
-</code></pre></div>
-
-<p>2) Create <code>test_views.py</code> in the <code>config</code> directory and add the following code</p>
-<div class="highlight"><pre><span></span><code><span class="w">   </span><span class="kn">from</span><span class="w"> </span><span class="nn">django.http</span><span class="w"> </span><span class="kn">import</span><span class="w"> </span><span class="n">HttpResponse</span>
-<span class="w">   </span><span class="kn">from</span><span class="w"> </span><span class="nn">.celery_app</span><span class="w"> </span><span class="kn">import</span><span class="w"> </span><span class="n">example_task</span>
-
-<span class="w">   </span><span class="k">def</span><span class="w"> </span><span class="nf">test_task</span><span class="p">(</span><span class="n">request</span><span class="p">):</span>
-<span class="w">      </span><span class="n">example_task</span><span class="o">.</span><span class="n">delay</span><span class="p">()</span>
-<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">HttpResponse</span><span class="p">(</span><span class="s2">&quot;Task triggered, see Celery logs&quot;</span><span class="p">)</span>
-</code></pre></div>
-
-<p>3) Now modify <code>url_patterns</code> in <code>config/urls.py</code> with the line</p>
-<div class="highlight"><pre><span></span><code>   path(&quot;test-task/&quot;, test_views.test_task, name=&quot;test_task&quot;),
-</code></pre></div>
-
-<p>After importing the view with</p>
-<div class="highlight"><pre><span></span><code><span class="w">   </span><span class="kn">from</span><span class="w"> </span><span class="nn">config</span><span class="w"> </span><span class="kn">import</span><span class="w"> </span><span class="n">test_views</span>
-</code></pre></div>
-
-<h4><em>B) Install <a href="https://github.com/celery/django-celery-results">celery-django-results</a></em></h4>
-<p>This allows us to view the results of Celery worker tasks in the database with Django Admin</p>
-<p>1) Add <code>django-celery-results==2.5.1</code> to <code>requirements/base.txt</code></p>
-<p>2) Add <code>"django_celery_results",</code> to <code>INSTALLED_APPS</code> in <code>config/settings/base.py</code></p>
-<p>3) Further modify <code>base.py</code> with the following additions</p>
-<div class="highlight"><pre><span></span><code>   <span class="n">CELERY_RESULT_BACKEND</span> <span class="o">=</span> <span class="n">env</span><span class="p">.</span><span class="n">str</span><span class="p">(</span><span class="s">&quot;CELERY_RESULT_BACKEND&quot;</span><span class="p">,</span> <span class="err">&quot;</span><span class="n">django</span><span class="o">-</span><span class="n">db</span><span class="err">”</span><span class="p">),</span> 
-   <span class="n">CELERY_TASK_TRACK_STARTED</span> <span class="o">=</span> <span class="n">True</span>
-</code></pre></div>
-
-<p>Modify the following line to allow CELERY_BROKER_URL to access REDIS_URL directly (this will be set by Fly automatically)</p>
-<div class="highlight"><pre><span></span><code>   CELERY_BROKER_URL = env(&#39;CELERY_BROKER_URL&#39;, default=env(&#39;REDIS_URL&#39;))
-</code></pre></div>
-
-<p>4) Build and migrate</p>
-<div class="highlight"><pre><span></span><code>   docker compose -f local.yml build
-   docker compose -f local.yml build
-   docker compose -f local.yml run --rm django python manage.py migrate
-</code></pre></div>
-
-<h4><em>C) Test locally with Flower and Django Admin</em></h4>
-<p>Run the stack and create superuser</p>
-<div class="highlight"><pre><span></span><code><span class="w">   </span><span class="k">export</span><span class="w"> </span><span class="n">COMPOSE_FILE</span><span class="o">=</span><span class="n">local</span><span class="o">.</span><span class="n">yml</span>
-<span class="w">   </span><span class="n">docker</span><span class="w"> </span><span class="n">compose</span><span class="w"> </span><span class="n">up</span>
-<span class="w">   </span><span class="n">docker</span><span class="w"> </span><span class="n">compose</span><span class="w"> </span><span class="n">run</span><span class="w"> </span><span class="o">--</span><span class="n">rm</span><span class="w"> </span><span class="n">django</span><span class="w"> </span><span class="n">python</span><span class="w"> </span><span class="n">manage</span><span class="o">.</span><span class="n">py</span><span class="w"> </span><span class="n">createsuperuser</span>
-</code></pre></div>
-
-<p>In a browser open up three tabs:</p>
-<p>1) Flower (Celery worker monitor): <a href="http://localhost:5555/">http://localhost:5555/</a></p>
-<blockquote>
-<p><em>Note: the login credentials are set in .envs/.local/.django</em></p>
-</blockquote>
-<p>2) Django Admin: <a href="http://localhost:8000/admin">http://localhost:8000/admin</a></p>
-<p>3) Web test-task: <a href="http://localhost:8000/test-task">http://localhost:8000/test-task</a></p>
-<blockquote>
-<p>The test-task GET request kicks off a worker task. Check the activity in the Flower tab, and then check again in Django Admin under <code>Celery Results / Task Results</code></p>
-<blockquote>
-<p><em>If you see Task State: SUCCESS you are ready to move to deployment!</em> </p>
-</blockquote>
-</blockquote>
-<h2>2) Create fly.toml and custom Dockerfile</h2>
+<p>1) Create/update three config files: <code>fly.toml</code>, <code>release.sh</code>, <code>Dockerfile</code></p>
+<p>2) Modify settings to accept Fly-provided secrets</p>
+<p>3) <code>fly launch</code> &amp; import secrets</p>
+<p>4) (Optional) Deploy via GH Actions</p>
+<p>Lets go!</p>
+<h2>1) Create fly.toml, release script, Dockerfile</h2>
 <p><em><a href="https://fly.io/docs/apps/launch/">Full description</a> of the Fly launch and deploy process</em></p>
-<p>Prereqs: flytmcl</p>
-<p>Running <code>fly launch</code> will create generic fly.toml and Dockerfile required for deployment, however we need custom files for Cookiecutter Django</p>
-<h3>Custom Dockerfile</h3>
-<p>This is a version of the Dockerfile found in <code>compose/production/django/Dockerfile</code> modified to fit Fly's build process.</p>
+<p>Before running <code>fly launch</code> create your own <code>fly.toml</code>, <code>release.sh</code>, and <code>Dockerfile</code>. All three should be in the project root directory.</p>
+<h3>Custom fly.toml</h3>
+<p>As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run a custom release script.</p>
+<p>The following variables require user input: <code>app, primary_region</code></p>
 <blockquote>
-<p>add notes about injecting dummy vars to run collect</p>
+<p>Note the number of workers can be set under <code>processes/app</code> (default is 1)</p>
 </blockquote>
+<p><em>fly.toml</em></p>
+<div class="highlight"><pre><span></span><code><span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;fly-cookiecutter-django-2&#39;</span>
+<span class="n">primary_region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;mad&#39;</span>
+<span class="n">console_command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/code/manage.py shell&#39;</span>
+
+<span class="o">[</span><span class="n">build</span><span class="o">]</span>
+
+<span class="o">[</span><span class="n">deploy</span><span class="o">]</span>
+<span class="w">  </span><span class="n">release_command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;sh /code/release.sh&#39;</span>
+
+<span class="o">[</span><span class="n">env</span><span class="o">]</span>
+<span class="w">  </span><span class="n">PORT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;8000&#39;</span>
+
+<span class="o">[</span><span class="n">processes</span><span class="o">]</span>
+<span class="w">  </span><span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;python -m gunicorn --bind :8000 --workers 1 config.wsgi&#39;</span>
+<span class="w">  </span><span class="n">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;python -m celery -A config.celery_app:app worker -l DEBUG&#39;</span>
+
+<span class="o">[</span><span class="n">http_service</span><span class="o">]</span>
+<span class="w">  </span><span class="n">internal_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8000</span>
+<span class="w">  </span><span class="n">force_https</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
+<span class="w">  </span><span class="n">auto_stop_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
+<span class="w">  </span><span class="n">auto_start_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
+<span class="w">  </span><span class="n">min_machines_running</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="w">  </span><span class="n">processes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">&#39;app&#39;</span><span class="o">]</span>
+
+<span class="o">[</span><span class="n">[vm</span><span class="o">]</span><span class="err">]</span>
+<span class="w">  </span><span class="n">memory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;1gb&#39;</span>
+<span class="w">  </span><span class="n">cpu_kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;shared&#39;</span>
+<span class="w">  </span><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
+
+<span class="o">[</span><span class="n">[statics</span><span class="o">]</span><span class="err">]</span>
+<span class="w">  </span><span class="n">guest_path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/code/static&#39;</span>
+<span class="w">  </span><span class="n">url_prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/static/&#39;</span>
+</code></pre></div>
+
+<h3>Release script</h3>
+<p>We need to run both <code>collectstatic</code> and <code>migrate</code> as release commands, thus we need a script. </p>
+<blockquote>
+<p>The release_command is done in a pre-deploy VM that has access to production environment variables</p>
+</blockquote>
+<p><em>release.sh</em></p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env sh</span>
+
+python<span class="w"> </span>manage.py<span class="w"> </span>collectstatic<span class="w"> </span>--noinput<span class="w"> </span>
+python<span class="w"> </span>manage.py<span class="w"> </span>migrate
+
+<span class="c1"># exit 123</span>
+</code></pre></div>
+
+<h3>Custom Dockerfile</h3>
+<p>This is a version of the Dockerfile found in <code>compose/production/django/Dockerfile</code>, the main change is to remove the entrypoint scripts.</p>
 <p><em>Dockerfile</em></p>
 <div class="highlight"><pre><span></span><code><span class="c1"># define an alias for the specific python version used in this file.</span>
 <span class="n">FROM</span><span class="w"> </span><span class="n">docker</span><span class="o">.</span><span class="n">io</span><span class="o">/</span><span class="n">python</span><span class="p">:</span><span class="mf">3.12</span><span class="o">.</span><span class="mi">3</span><span class="o">-</span><span class="n">slim</span><span class="o">-</span><span class="n">bookworm</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">python</span>
@@ -181,108 +159,124 @@
 
 <span class="n">COPY</span><span class="w"> </span><span class="o">.</span><span class="w"> </span><span class="o">/</span><span class="n">code</span>
 
-<span class="c1"># Set dummy vars for building purposes</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_SETTINGS_MODULE</span><span class="w"> </span><span class="s2">&quot;config.settings.production&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DATABASE_URL</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_SECRET_KEY</span><span class="w"> </span><span class="s2">&quot;non-secret-key-for-building-purposes&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">REDIS_URL</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_ADMIN_URL</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_ALLOWED_HOSTS</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">MAILJET_API_KEY</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">MAILJET_SECRET_KEY</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">SENTRY_DSN</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_AWS_ACCESS_KEY_ID</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_AWS_SECRET_ACCESS_KEY</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-<span class="n">ENV</span><span class="w"> </span><span class="n">DJANGO_AWS_STORAGE_BUCKET_NAME</span><span class="w"> </span><span class="s2">&quot;temp&quot;</span>
-
-<span class="n">RUN</span><span class="w"> </span><span class="n">python</span><span class="w"> </span><span class="n">manage</span><span class="o">.</span><span class="n">py</span><span class="w"> </span><span class="n">collectstatic</span><span class="w"> </span><span class="o">--</span><span class="n">noinput</span>
-
 <span class="n">EXPOSE</span><span class="w"> </span><span class="mi">8000</span>
 
 <span class="n">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;gunicorn&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--bind&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;:8000&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--workers&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;config.wsgi&quot;</span><span class="p">]</span>
 </code></pre></div>
 
-<h3>Custom fly.toml</h3>
-<p>As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run migrate on deploy.</p>
-<p>The following variables require user input: <code>app, primary_region</code></p>
-<blockquote>
-<p>Note the number of workers can be set under <code>processes/app</code> (default is 1)</p>
-</blockquote>
-<p><em>fly.toml</em></p>
-<div class="highlight"><pre><span></span><code><span class="err">#</span><span class="w"> </span><span class="n">fly</span><span class="p">.</span><span class="n">toml</span><span class="w"> </span><span class="n">app</span><span class="w"> </span><span class="n">configuration</span><span class="w"> </span><span class="k">file</span><span class="w"> </span><span class="n">generated</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">fly</span><span class="o">-</span><span class="n">cookiecutter</span><span class="o">-</span><span class="n">django</span><span class="o">-</span><span class="mi">1</span><span class="w"> </span><span class="k">on</span><span class="w"> </span><span class="mi">2024</span><span class="o">-</span><span class="mi">05</span><span class="o">-</span><span class="mi">01</span><span class="nl">T15</span><span class="p">:</span><span class="mi">44</span><span class="err">:</span><span class="mi">30</span><span class="o">+</span><span class="mi">01</span><span class="err">:</span><span class="mi">00</span>
-<span class="err">#</span>
-<span class="err">#</span><span class="w"> </span><span class="n">See</span><span class="w"> </span><span class="nl">https</span><span class="p">:</span><span class="o">//</span><span class="n">fly</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">docs</span><span class="o">/</span><span class="n">reference</span><span class="o">/</span><span class="n">configuration</span><span class="o">/</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">information</span><span class="w"> </span><span class="n">about</span><span class="w"> </span><span class="n">how</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="k">use</span><span class="w"> </span><span class="n">this</span><span class="w"> </span><span class="k">file</span><span class="p">.</span>
-<span class="err">#</span>
+<h2>2) Modify settings to accept Fly-assigned environment variables</h2>
+<p>Fly will automatically assign several environment variables as you add services</p>
+<div class="highlight"><pre><span></span><code><span class="n">DATABASE_URL</span> <span class="o">-</span> <span class="n">Postgres</span>
+<span class="n">REDIS_URL</span> <span class="o">-</span> <span class="n">Redis</span>
 
-<span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;fly-cookiecutter-django-1&#39;</span>
-<span class="n">primary_region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;mad&#39;</span>
-<span class="n">console_command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/code/manage.py shell&#39;</span>
-
-<span class="o">[</span><span class="n">build</span><span class="o">]</span>
-
-<span class="o">[</span><span class="n">deploy</span><span class="o">]</span>
-<span class="w">  </span><span class="n">release_command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;python manage.py migrate&#39;</span>
-
-<span class="o">[</span><span class="n">env</span><span class="o">]</span>
-<span class="w">  </span><span class="n">PORT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;8000&#39;</span>
-
-<span class="o">[</span><span class="n">processes</span><span class="o">]</span>
-<span class="w">  </span><span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;python -m gunicorn --bind :8000 --workers 1 config.wsgi&#39;</span>
-<span class="w">  </span><span class="n">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;python -m celery -A config.celery_app:app worker -l DEBUG&#39;</span>
-
-<span class="o">[</span><span class="n">http_service</span><span class="o">]</span>
-<span class="w">  </span><span class="n">internal_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8000</span>
-<span class="w">  </span><span class="n">force_https</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
-<span class="w">  </span><span class="n">auto_stop_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
-<span class="w">  </span><span class="n">auto_start_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span>
-<span class="w">  </span><span class="n">min_machines_running</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
-<span class="w">  </span><span class="n">processes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">&#39;app&#39;</span><span class="o">]</span>
-
-<span class="o">[</span><span class="n">[vm</span><span class="o">]</span><span class="err">]</span>
-<span class="w">  </span><span class="n">memory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;1gb&#39;</span>
-<span class="w">  </span><span class="n">cpu_kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;shared&#39;</span>
-<span class="w">  </span><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
-
-<span class="o">[</span><span class="n">[statics</span><span class="o">]</span><span class="err">]</span>
-<span class="w">  </span><span class="n">guest_path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/code/static&#39;</span>
-<span class="w">  </span><span class="n">url_prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;/static/&#39;</span>
+<span class="n">AWS_REGION</span> <span class="o">-</span> <span class="n">Tigris</span>
+<span class="n">AWS_ENDPOINT_URL_S3</span> <span class="o">-</span> <span class="n">Tigris</span>
+<span class="n">AWS_ACCESS_KEY_ID</span> <span class="o">-</span> <span class="n">Tigris</span>
+<span class="n">AWS_SECRET_ACCESS_KEY</span> <span class="o">-</span> <span class="n">Tigris</span>
 </code></pre></div>
 
-<h2>3) Launch and Deploy</h2>
-<h3>Launch</h3>
+<p>Modify both <code>settings/production.py</code> and <code>.envs/.production/.django</code> to accomodate these variables</p>
+<p><em>relevant section of production.py</em></p>
+<div class="highlight"><pre><span></span><code><span class="o">#</span> <span class="n">STORAGES</span>
+<span class="o">#</span> <span class="o">------------------------------------------------------------------------------</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/#</span><span class="n">installation</span>
+<span class="n">INSTALLED_APPS</span> <span class="o">+=</span> <span class="p">[</span><span class="s">&quot;storages&quot;</span><span class="p">]</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_ACCESS_KEY_ID</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;DJANGO_AWS_ACCESS_KEY_ID&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span> <span class="n">or</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;AWS_ACCESS_KEY_ID&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_SECRET_ACCESS_KEY</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;DJANGO_AWS_SECRET_ACCESS_KEY&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span> <span class="n">or</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;AWS_SECRET_ACCESS_KEY&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_STORAGE_BUCKET_NAME</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;DJANGO_AWS_STORAGE_BUCKET_NAME&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span> <span class="n">or</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;BUCKET_NAME&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_QUERYSTRING_AUTH</span> <span class="o">=</span> <span class="n">False</span>
+<span class="o">#</span> <span class="kr">DO</span> <span class="n">NOT</span> <span class="n">change</span> <span class="n">these</span> <span class="n">unless</span> <span class="n">you</span> <span class="n">know</span> <span class="n">what</span> <span class="n">you</span><span class="err">&#39;</span><span class="n">re</span> <span class="n">doing</span><span class="p">.</span>
+<span class="n">_AWS_EXPIRY</span> <span class="o">=</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">60</span> <span class="o">*</span> <span class="mi">24</span> <span class="o">*</span> <span class="mi">7</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_S3_OBJECT_PARAMETERS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s">&quot;CacheControl&quot;</span><span class="p">:</span> <span class="n">f</span><span class="s">&quot;max-age={_AWS_EXPIRY}, s-maxage={_AWS_EXPIRY}, must-revalidate&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_S3_MAX_MEMORY_SIZE</span> <span class="o">=</span> <span class="n">env</span><span class="p">.</span><span class="n">int</span><span class="p">(</span>
+    <span class="s">&quot;DJANGO_AWS_S3_MAX_MEMORY_SIZE&quot;</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mi">100</span><span class="n">_000_000</span><span class="p">,</span>  <span class="o">#</span> <span class="mi">100</span><span class="n">MB</span>
+<span class="p">)</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">settings</span>
+<span class="n">AWS_S3_REGION_NAME</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;DJANGO_AWS_S3_REGION_NAME&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span> <span class="n">or</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;AWS_REGION&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+<span class="o">#</span> <span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">django</span><span class="o">-</span><span class="n">storages</span><span class="p">.</span><span class="n">readthedocs</span><span class="p">.</span><span class="n">io</span><span class="o">/</span><span class="n">en</span><span class="o">/</span><span class="n">latest</span><span class="o">/</span><span class="n">backends</span><span class="o">/</span><span class="n">amazon</span><span class="o">-</span><span class="n">S3</span><span class="p">.</span><span class="n">html</span><span class="o">#</span><span class="n">cloudfront</span>
+<span class="n">AWS_S3_ENDPOINT_URL</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;AWS_ENDPOINT_URL_S3&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+<span class="n">AWS_S3_CUSTOM_DOMAIN</span> <span class="o">=</span> <span class="n">env</span><span class="p">(</span><span class="s">&quot;DJANGO_AWS_S3_CUSTOM_DOMAIN&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">None</span><span class="p">)</span>
+
+<span class="o">#</span> <span class="n">Parse</span> <span class="n">the</span> <span class="n">endpoint</span> <span class="n">URL</span> <span class="n">to</span> <span class="n">get</span> <span class="n">the</span> <span class="n">domain</span> <span class="n">without</span> <span class="n">protocol</span>
+<span class="n">if</span> <span class="n">AWS_S3_ENDPOINT_URL</span><span class="p">:</span>
+    <span class="n">parsed_url</span> <span class="o">=</span> <span class="n">urlparse</span><span class="p">(</span><span class="n">AWS_S3_ENDPOINT_URL</span><span class="p">)</span>
+    <span class="n">endpoint_domain</span> <span class="o">=</span> <span class="n">parsed_url</span><span class="p">.</span><span class="n">netloc</span>
+<span class="n">else</span><span class="p">:</span>
+    <span class="n">endpoint_domain</span> <span class="o">=</span> <span class="n">None</span>
+
+<span class="n">aws_s3_domain</span> <span class="o">=</span> <span class="n">AWS_S3_CUSTOM_DOMAIN</span> <span class="n">or</span> <span class="n">endpoint_domain</span> <span class="n">or</span> <span class="n">f</span><span class="s">&quot;{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com&quot;</span>
+</code></pre></div>
+
+<p><em>relevant section of .envs/.production/.django</em></p>
+<div class="highlight"><pre><span></span><code><span class="c"># comment out these vars</span>
+
+<span class="c"># AWS</span>
+<span class="c"># </span><span class="nb">------------------------------------------------------------------------------</span>
+<span class="c"># DJANGO_AWS_ACCESS_KEY_ID=</span>
+<span class="c"># DJANGO_AWS_SECRET_ACCESS_KEY=</span>
+<span class="c"># DJANGO_AWS_STORAGE_BUCKET_NAME=</span>
+
+<span class="c"># Redis</span>
+<span class="c"># </span><span class="nb">------------------------------------------------------------------------------</span>
+<span class="c"># REDIS_URL=</span>
+</code></pre></div>
+
+<h2>3) Launch and Import Secrets</h2>
+<h3>Launch wizard</h3>
 <p>Run <code>fly launch</code> from the root directory</p>
-<p><em>Launch wizard</em></p>
 <div class="highlight"><pre><span></span><code>- YES to copy config to new app
 - NO to overwriting Dockerfile
-- YES to modifying configuration, click to open setting page, select Postgres and Redis instances
+- YES to modifying configuration, click to open setting page, select Postgres, Redis, Tigris
 </code></pre></div>
 
 <h3>Import secrets</h3>
-<ul>
-<li>DATABASE_URL and REDIS_URL are set by <code>fly launch</code>, all others need to be imported</li>
-<li>Modify <code>.envs/.production/.django</code> as needed, if a service isnt ready just leave a temp value</li>
-<li>You must comment out <code>REDIS_URL</code></li>
-</ul>
 <p>Run the following command to import the secrets to Fly:</p>
 <p><code>cat .envs/.production/.django | fly secrets import</code></p>
-<h3>Deploy</h3>
+<h3>First Deploy</h3>
 <p>Run <code>fly deploy</code></p>
-<p>If deployment was successful, create a superuser via ssh console</p>
-<div class="highlight"><pre><span></span><code>fly ssh console
-python manage.py createsuperuser
+<p>If deployment was successful, create a superuser via <code>fly ssh console</code></p>
+<h2>4) (Optional) Deploy with Github Actions</h2>
+<p><em>Fly docs on <a href="https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/">Deploy with Github Actions</a></em></p>
+<p>1) From the project source directory, get a Fly API deploy token by running </p>
+<div class="highlight"><pre><span></span><code>fly tokens create deploy -x 999999h
 </code></pre></div>
 
-<p>Now open tabs for Django Admin and test-task to verify the system is working.</p>
-<hr>
-<h4>If you've gotten this far congratulations you are now live on Fly.io!</h4>
-<h3>Resources</h3>
-<ul>
-<li><a href="https://github.com/mswaringen/fly-cookiecutter-django">Example code on Github</a></li>
-<li><a href="https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/">Deploy with Github Actions</a>  </li>
-</ul>
+<p>Copy the output, including the FlyV1 and space at the beginning.</p>
+<p>2) Go to your repository on GitHub and select Settings. Under Secrets and variables, select Actions, and then create a new repository secret called FLY_API_TOKEN, paste the value previously created in step 1.</p>
+<p>3) Back in your project source directory, create <code>.github/workflows/fly.yml</code> with these contents:</p>
+<div class="highlight"><pre><span></span><code><span class="n">name</span><span class="o">:</span><span class="w"> </span><span class="n">Fly</span><span class="w"> </span><span class="n">Deploy</span>
+<span class="n">on</span><span class="o">:</span>
+<span class="w">  </span><span class="n">push</span><span class="o">:</span>
+<span class="w">    </span><span class="n">branches</span><span class="o">:</span>
+<span class="w">      </span><span class="o">-</span><span class="w"> </span><span class="n">master</span><span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">change</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">main</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">needed</span>
+<span class="n">jobs</span><span class="o">:</span>
+<span class="w">  </span><span class="n">deploy</span><span class="o">:</span>
+<span class="w">    </span><span class="n">name</span><span class="o">:</span><span class="w"> </span><span class="n">Deploy</span><span class="w"> </span><span class="n">app</span>
+<span class="w">    </span><span class="n">runs</span><span class="o">-</span><span class="n">on</span><span class="o">:</span><span class="w"> </span><span class="n">ubuntu</span><span class="o">-</span><span class="n">latest</span>
+<span class="w">    </span><span class="n">concurrency</span><span class="o">:</span><span class="w"> </span><span class="n">deploy</span><span class="o">-</span><span class="n">group</span><span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">optional</span><span class="o">:</span><span class="w"> </span><span class="n">ensure</span><span class="w"> </span><span class="n">only</span><span class="w"> </span><span class="n">one</span><span class="w"> </span><span class="n">action</span><span class="w"> </span><span class="n">runs</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">time</span>
+<span class="w">    </span><span class="n">steps</span><span class="o">:</span>
+<span class="w">      </span><span class="o">-</span><span class="w"> </span><span class="n">uses</span><span class="o">:</span><span class="w"> </span><span class="n">actions</span><span class="o">/</span><span class="n">checkout</span><span class="err">@</span><span class="n">v4</span>
+<span class="w">      </span><span class="o">-</span><span class="w"> </span><span class="n">uses</span><span class="o">:</span><span class="w"> </span><span class="n">superfly</span><span class="sr">/flyctl-actions/s</span><span class="n">etup</span><span class="o">-</span><span class="n">flyctl</span><span class="err">@</span><span class="n">master</span>
+<span class="w">      </span><span class="o">-</span><span class="w"> </span><span class="n">run</span><span class="o">:</span><span class="w"> </span><span class="n">flyctl</span><span class="w"> </span><span class="n">deploy</span><span class="w"> </span><span class="o">--</span><span class="n">remote</span><span class="o">-</span><span class="n">only</span>
+<span class="w">        </span><span class="n">env</span><span class="o">:</span>
+<span class="w">          </span><span class="n">FLY_API_TOKEN</span><span class="o">:</span><span class="w"> </span><span class="n">$</span><span class="o">{{</span><span class="w"> </span><span class="n">secrets</span><span class="o">.</span><span class="na">FLY_API_TOKEN</span><span class="w"> </span><span class="o">}}</span>
+</code></pre></div>
+
+<p>4) Push changes to start automatic deployment</p>
+<h2>Example Code</h2>
+<p>Stuck on something? Check out the <a href="https://github.com/mswaringen/fly-cookiecutter-django">Example code on Github</a></p>
   <footer>
-    <p>Published: <time datetime="2024-05-21T16:00:00+01:00">
-      Tue 21 May 2024
+    <p>Published: <time datetime="2024-05-22T14:00:00+01:00">
+      Wed 22 May 2024
     </time></p>
     <address>
       By           <a href="https://sweezy.dev/author/mark-swaringen.html">Mark Swaringen</a>
