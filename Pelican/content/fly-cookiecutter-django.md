@@ -4,7 +4,7 @@ Category: devops
 
 #### _with Celery, Postgres, Redis, and S3 storage with Tigris_
 
-Cookiecutter Django is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time with configuration.
+[Cookiecutter Django](https://github.com/cookiecutter/cookiecutter-django) is awesome but it can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included. Hopefully this can save others some time with configuration.
 
 
 
