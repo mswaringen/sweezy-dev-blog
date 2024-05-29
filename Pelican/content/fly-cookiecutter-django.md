@@ -181,6 +181,8 @@ _relevant section of base.py_
 
 _relevant section of production.py_
 ```
+from urllib.parse import urlparse
+
 # STORAGES
 # ------------------------------------------------------------------------------
 # https://django-storages.readthedocs.io/en/latest/#installation
@@ -296,4 +298,4 @@ jobs:
 4) Push changes to start automatic deployment
 
 ## Example Code
-Stuck on something? Check out the [Example code on Github](https://github.com/mswaringen/fly-cookiecutter-django)
+Stuck on something? Check out the [Example code on Github](https://github.com/mswaringen/django-base-project)
